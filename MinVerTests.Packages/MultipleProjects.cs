@@ -16,7 +16,7 @@ public class MultipleProjects
         // arrange
         var path = MethodBase.GetCurrentMethod().GetTestDirectory();
 
-        await Sdk.CreateSolution(path, new[] { "project0", "project1", "project2", "project3", });
+        await Sdk.CreateSolution(path, ["project0", "project1", "project2", "project3",]);
 
         var props =
             $@"<Project>
