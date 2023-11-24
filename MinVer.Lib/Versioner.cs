@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using LibGit2Sharp;
 
 namespace MinVer.Lib;
 
@@ -33,7 +34,7 @@ public static class Versioner
 
     private static (Version Version, int? Height) GetVersion(string workDir, string tagPrefix, List<string> defaultPreReleaseIdentifiers, ILogger log)
     {
-        if (!Git.IsWorkingDirectory(workDir, log))
+        if (!Git.TryGetRepository(workDir, out var repository))
         {
             var version = new Version(defaultPreReleaseIdentifiers);
 
@@ -42,7 +43,7 @@ public static class Versioner
             return (version, default);
         }
 
-        if (!Git.TryGetHead(workDir, out var head, log))
+        if (repository.Info.IsHeadUnborn)
         {
             var version = new Version(defaultPreReleaseIdentifiers);
 
@@ -51,11 +52,13 @@ public static class Versioner
             return (version, default);
         }
 
-        var tags = Git.GetTags(workDir, log);
+        var tags = repository.Tags;
 
-        var orderedCandidates = GetCandidates(head, tags, tagPrefix, defaultPreReleaseIdentifiers, log)
+        var orderedCandidates = GetCandidates(repository.Head.Commits.First(), tags, tagPrefix, defaultPreReleaseIdentifiers, log)
             .OrderBy(candidate => candidate.Version)
             .ThenByDescending(candidate => candidate.Index).ToList();
+
+        repository.Dispose();
 
         var tagWidth = log.IsDebugEnabled ? orderedCandidates.Max(candidate => candidate.Tag.Length) : 0;
         var versionWidth = log.IsDebugEnabled ? orderedCandidates.Max(candidate => candidate.Version.ToString().Length) : 0;
@@ -77,19 +80,19 @@ public static class Versioner
         return (selectedCandidate.Version, selectedCandidate.Height);
     }
 
-    private static List<Candidate> GetCandidates(Commit head, IEnumerable<(string Name, string Sha)> tags, string tagPrefix, List<string> defaultPreReleaseIdentifiers, ILogger log)
+    private static List<Candidate> GetCandidates(Commit head, TagCollection tags, string tagPrefix, List<string> defaultPreReleaseIdentifiers, ILogger log)
     {
         var tagsAndVersions = new List<(string Name, string Sha, Version Version)>();
 
-        foreach (var (name, sha) in tags)
+        foreach (var tag in tags)
         {
-            if (Version.TryParse(name, out var version, tagPrefix))
+            if (Version.TryParse(tag.FriendlyName, out var version, tagPrefix))
             {
-                tagsAndVersions.Add((name, sha, version));
+                tagsAndVersions.Add((tag.FriendlyName, tag.PeeledTarget.Sha, version));
             }
             else
             {
-                _ = log.IsDebugEnabled && log.Debug($"Ignoring non-version tag {{ Name: {name}, Sha: {sha} }}.");
+                _ = log.IsDebugEnabled && log.Debug($"Ignoring non-version tag {{ Name: {tag.FriendlyName}, Sha: {tag.PeeledTarget.Sha} }}.");
             }
         }
 
@@ -143,14 +146,14 @@ public static class Versioner
 
             if (log.IsTraceEnabled)
             {
-                _ = log.Trace($"Commit {item.Commit} has {item.Commit.Parents.Count} parent(s):");
+                _ = log.Trace($"Commit {item.Commit} has {item.Commit.Parents.Count()} parent(s):");
                 foreach (var parent in item.Commit.Parents)
                 {
                     _ = log.Trace($"- {parent}");
                 }
             }
 
-            foreach (var parent in ((IEnumerable<Commit>)item.Commit.Parents).Reverse())
+            foreach (var parent in item.Commit.Parents.Reverse())
             {
                 itemsToCheck.Push((parent, item.Height + 1, item.Commit));
             }
@@ -175,6 +178,6 @@ public static class Versioner
         public override string ToString() => this.ToString(0, 0, 0);
 
         public string ToString(int tagWidth, int versionWidth, int heightWidth) =>
-            $"{{ {nameof(this.Commit)}: {this.Commit.ShortSha}, {nameof(this.Tag)}: {$"'{this.Tag}',".PadRight(tagWidth + 3)} {nameof(this.Version)}: {$"{this.Version},".PadRight(versionWidth + 1)} {nameof(this.Height)}: {this.Height.ToString(CultureInfo.CurrentCulture).PadLeft(heightWidth)} }}";
+            $"{{ {nameof(this.Commit)}: {this.Commit.Sha[..Math.Min(7, this.Commit.Sha.Length)]}, {nameof(this.Tag)}: {$"'{this.Tag}',".PadRight(tagWidth + 3)} {nameof(this.Version)}: {$"{this.Version},".PadRight(versionWidth + 1)} {nameof(this.Height)}: {this.Height.ToString(CultureInfo.CurrentCulture).PadLeft(heightWidth)} }}";
     }
 }
