@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -84,6 +85,13 @@ public class MinVerTask : Task
         }
 
         Version version;
+
+        if (TryGetCachedResult("blah", out var cachedVersion))
+        {
+            Version = cachedVersion;
+            return true;
+        }
+
         try
         {
             version = Versioner.GetVersion(workDir, options.TagPrefix ?? "", options.MinMajorMinor ?? MajorMinor.Default, options.BuildMeta ?? "", options.AutoIncrement ?? default, defaultPreReleaseIdentifiers ?? PreReleaseIdentifiers.Default, options.IgnoreHeight ?? false, log);
@@ -96,6 +104,26 @@ public class MinVerTask : Task
 
         Version = version.ToString();
 
+        CacheResult("blah", Version);
+
         return true;
+    }
+
+    private void CacheResult(object cacheKey, string version) => BuildEngine4.RegisterTaskObject(cacheKey, version, RegisteredTaskObjectLifetime.Build, allowEarlyCollection: true);
+
+    private bool TryGetCachedResult(object cacheKey, [NotNullWhen(returnValue: true)] out string version)
+    {
+        version = (string)BuildEngine4.GetRegisteredTaskObject(cacheKey, RegisteredTaskObjectLifetime.Build);
+
+        if (version is not null)
+        {
+            Log.LogMessage(MessageImportance.High, "Using cached version");
+        }
+        else
+        {
+            Log.LogMessage(MessageImportance.High, "Cache was empty");
+        }
+
+        return version is not null;
     }
 }
